@@ -4,25 +4,20 @@ import Restaurant from '../pages/Restaurant.vue'
 import User from '../pages/User.vue'
 
 const routes = [
+  { path: '/', name: 'Home', component: Home },
+  { path: '/restaurant/:id', name: 'Restaurant', component: Restaurant, props: true },
+  { path: '/user', name: 'User', component: User },
   {
-    path: '/',
-    name: 'Home',
-    component: Home,
-  },
-  {
-    path: '/restaurant/:id',
-    name: 'Restaurant',
-    component: Restaurant,
+    path: '/FavoriteList/:playlistName?id=:playlistId',
+    name: 'PlaylistDescription',
+    component: () => import('@/components/FavoriteList.vue'),
     props: true,
-  },
-  {
-    path: '/user',
-    name: 'User',
-    component: User,
   },
 ]
 
-export const router = createRouter({
-  history: createWebHistory(import.meta.env.BASE_URL),
+const router = createRouter({
+  history: createWebHistory(),
   routes,
 })
+
+export default router
