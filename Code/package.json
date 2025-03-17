@@ -13,6 +13,7 @@
     "prepare": "husky"
   },
   "dependencies": {
+    "axios": "^1.8.3",
     "esri-leaflet": "^3.0.14",
     "esri-leaflet-geocoder": "^3.1.5",
     "geocode": "^0.0.3",
