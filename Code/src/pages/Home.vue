@@ -10,15 +10,6 @@
     <div class="restaurants">
       <div class="search-container">
         <div class="search-bar">
-          <ul v-if="showDropdown && searchQuery" class="dropdown">
-            <li
-              v-for="suggestion in searchSuggestions"
-              :key="suggestion.id"
-              @click="selectSearch(suggestion.name)"
-            >
-              {{ suggestion.name }}
-            </li>
-          </ul>
           <input
             type="text"
             v-model="searchQuery"
@@ -30,80 +21,51 @@
         <div class="filter-bar">
           <select v-model="selectedPrice">
             <option value="">Price</option>
-            <option value="low">$ - Cheap</option>
-            <option value="medium">$$ - Moderate</option>
-            <option value="high">$$$ - Expensive</option>
+            <option value="1">$ - Cheap</option>
+            <option value="2">$$ - Moderate</option>
+            <option value="3">$$$ - Expensive</option>
+            <option value="4">$$$ - High End</option>
+            <option value="5">$$$ - Exclusive</option>
           </select>
           <select v-model="selectedGenre">
-            <option value="">Genre</option>
-            <option value="italian">Italian</option>
-            <option value="japanese">Japanese</option>
-            <option value="halal">Halal</option>
-            <option value="fast-food">Fast Food</option>
-            <option value="vegan">Vegan</option>
+            <option value="">Cuisine Type</option>
+            <option v-for="genre in genreOptions" :key="genre" :value="genre">
+              {{ genre.charAt(0).toUpperCase() + genre.slice(1) }}
+            </option>
           </select>
         </div>
       </div>
-      <div class="all-restaurants" :key="selectedPrice + selectedGenre + searchQuery">
-        <div class="restaurant" v-for="restaurant in filteredRestaurants" :key="restaurant.id">
-          <div class="box">
-            <img :src="restaurant.photos[0]" alt="" class="image-restau" />
-            <h4 class="restaurant-title">{{ restaurant.name }}</h4>
-            <p class="rating">{{ restaurant.rating }} stars</p>
-            <a href="#" class="more"
-              ><router-link :to="'/restaurant/' + restaurant.id">Show more</router-link></a
-            >
+      <div class="restaurant-list">
+        <div
+          class="restaurant-card"
+          v-for="restaurant in paginatedRestaurants"
+          :key="restaurant.id"
+        >
+          <div class="restaurant-header">
+            <h2 class="restaurant-name">{{ restaurant.name }}</h2>
+            <p class="restaurant-tel">📞 {{ restaurant.tel }}</p>
           </div>
+          <img :src="restaurant.photos[0]" alt="Restaurant Image" class="restaurant-image" />
+          <div class="restaurant-info">
+            <p class="restaurant-address">📍 {{ restaurant.address }}</p>
+            <p class="restaurant-rating">{{ getStars(restaurant.rating) }}</p>
+          </div>
+          <router-link :to="'/restaurant/' + restaurant.id" class="details-button"
+            >View Details</router-link
+          >
+          <ReviewButton :restaurant-id="restaurant.id" class="review-button-card" />
         </div>
       </div>
+      <div class="pagination">
+        <button @click="prevPage" :disabled="currentPage === 0">Previous</button>
+        <span>Page {{ currentPage + 1 }} of {{ totalPages }}</span>
+        <button @click="nextPage" :disabled="currentPage === totalPages - 1">Next</button>
+      </div>
       <div class="geo-section">
-        <h2>📍 Votre position</h2>
+        <h2>📍 Your Location</h2>
         <div id="map"></div>
       </div>
     </div>
-    <footer class="footer">
-      <div class="container">
-        <div class="row">
-          <div class="footer-elements">
-            <h4>Company</h4>
-            <ul>
-              <li><a href="#">About us</a></li>
-              <li><a href="#">Our services</a></li>
-              <li><a href="#">Privacy policy</a></li>
-              <li><a href="#">Affiliate program</a></li>
-            </ul>
-          </div>
-          <div class="footer-elements">
-            <h4>Get help</h4>
-            <ul>
-              <li><a href="#">FAQ</a></li>
-              <li><a href="#">Returns</a></li>
-              <li><a href="#">Order status</a></li>
-              <li><a href="#">Payment options</a></li>
-            </ul>
-          </div>
-          <div class="footer-elements">
-            <h4>Follow us</h4>
-            <div class="social-link">
-              <ul>
-                <li>
-                  <a href="#"><i class="fa-brands fa-facebook"></i></a>
-                </li>
-                <li>
-                  <a href="#"><i class="fa-brands fa-instagram"></i></a>
-                </li>
-                <li>
-                  <a href="#"><i class="fa-brands fa-twitter"></i></a>
-                </li>
-                <li>
-                  <a href="#"><i class="fa-brands fa-linkedin"></i></a>
-                </li>
-              </ul>
-            </div>
-          </div>
-        </div>
-      </div>
-    </footer>
   </div>
 </template>
 
@@ -111,24 +73,73 @@
 import { onMounted, ref, watch } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { useRestaurantData } from '@/assets/restaurantData.js'
+import { getAllRestaurants } from '@/api/restaurantApi.js'
+import ReviewButton from '@/components/restaurantVisitebutton.vue'
 
-const {
-  filteredRestaurants,
-  searchQuery,
-  selectedPrice,
-  selectedGenre,
-  showDropdown,
-  searchSuggestions,
-} = useRestaurantData()
+const allRestaurants = ref([])
+const paginatedRestaurants = ref([])
+const searchQuery = ref('')
+const selectedPrice = ref('')
+const selectedGenre = ref('')
+const showDropdown = ref(false)
+const map = ref(null)
+const markers = ref([])
+const userMarker = ref(null)
+const isInitialLoad = ref(true)
+const currentPage = ref(0)
+const totalPages = ref(0)
+const elementParPages = 10
+const genreOptions = ref([])
+const searchSuggestions = ref([])
 
-const selectSearch = (name) => {
-  searchQuery.value = name
-  showDropdown.value = false
+const fetchRestaurants = async () => {
+  try {
+    const data = await getAllRestaurants({
+      limit: elementParPages,
+      page: currentPage.value,
+      q: searchQuery.value,
+      price_range: selectedPrice.value,
+      genres: selectedGenre.value,
+    })
+
+    allRestaurants.value = data.items.map((restaurant) => ({
+      id: restaurant.id,
+      name: restaurant.name,
+      address: restaurant.address,
+      rating: Math.round(restaurant.rating),
+      price: restaurant.price_range,
+      genres: restaurant.genres,
+      latitude: restaurant.location.coordinates[1],
+      longitude: restaurant.location.coordinates[0],
+      photos: restaurant.pictures,
+      tel: restaurant.tel,
+    }))
+
+    const allGenres = new Set()
+    allRestaurants.value.forEach((restaurant) => {
+      restaurant.genres.forEach((genre) => allGenres.add(genre))
+    })
+    genreOptions.value = Array.from(allGenres).sort((a, b) => a.localeCompare(b))
+
+    paginatedRestaurants.value = allRestaurants.value
+    totalPages.value = Math.ceil(data.total / elementParPages)
+
+    initMap()
+  } catch (error) {
+    console.error('Error fetching restaurants:', error)
+  }
 }
 
 const handleInput = () => {
   showDropdown.value = searchQuery.value.length > 0
+  if (searchQuery.value) {
+    searchSuggestions.value = allRestaurants.value.filter((restaurant) =>
+      restaurant.name.toLowerCase().includes(searchQuery.value.toLowerCase()),
+    )
+  } else {
+    searchSuggestions.value = []
+  }
+  fetchRestaurants()
 }
 
 const hideDropdown = () => {
@@ -137,31 +148,25 @@ const hideDropdown = () => {
   }, 200)
 }
 
-const map = ref(null)
-const markers = ref([])
-const userMarker = ref(null)
-const isInitialLoad = ref(true)
+const getStars = (rating) => {
+  const fullStars = '★'.repeat(rating)
+  const emptyStars = '☆'.repeat(5 - rating)
+  return `${fullStars}${emptyStars}`
+}
+
 const initMap = () => {
-  markers.value.forEach((marker) => marker.removeFrom(map.value))
-  markers.value = []
-
-  if (!filteredRestaurants.value || filteredRestaurants.value.length === 0) {
-    console.log('No restaurants match the criteria.')
-    return
-  }
-
   if (!map.value) {
-    map.value = L.map('map').setView(
-      [filteredRestaurants.value[0].latitude, filteredRestaurants.value[0].longitude],
-      13,
-    )
+    map.value = L.map('map').setView([46.8139, -71.2082], 13)
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap contributors',
     }).addTo(map.value)
   }
 
-  filteredRestaurants.value.forEach((restaurant) => {
+  markers.value.forEach((marker) => marker.remove())
+  markers.value = []
+
+  paginatedRestaurants.value.forEach((restaurant) => {
     if (restaurant.latitude && restaurant.longitude) {
       const marker = L.marker([restaurant.latitude, restaurant.longitude])
         .addTo(map.value)
@@ -189,7 +194,7 @@ const initMap = () => {
       } else {
         userMarker.value = L.marker([latitude, longitude], { icon: redIcon })
           .addTo(map.value)
-          .bindPopup('Vous êtes là!')
+          .bindPopup('You are here!')
           .openPopup()
       }
 
@@ -200,68 +205,40 @@ const initMap = () => {
   }
 }
 
-watch(filteredRestaurants, () => {
-  initMap()
+const nextPage = () => {
+  if (currentPage.value < totalPages.value - 1) {
+    currentPage.value++
+    fetchRestaurants()
+  }
+}
+
+const prevPage = () => {
+  if (currentPage.value > 0) {
+    currentPage.value--
+    fetchRestaurants()
+  }
+}
+
+watch([searchQuery, selectedPrice, selectedGenre], () => {
+  currentPage.value = 0
+  fetchRestaurants()
 })
 
-onMounted(() => {
-  searchQuery.value = ''
+onMounted(async () => {
+  await fetchRestaurants()
   initMap()
 })
 </script>
 
-<style>
+<style scoped>
 * {
   margin: 0;
   padding: 0;
 }
 
-#navigation {
-  background-color: #ffe8d6;
-  display: flex;
-  flex-flow: row wrap;
-  width: 100%;
-  height: 90px;
-  align-items: center;
-  justify-content: space-evenly;
-}
-
-.item-navigation {
-  padding: 2rem;
-  justify-content: space-evenly;
-}
-
-#elements {
-  color: black;
-  justify-content: center;
-  font-family: 'Markazi Text', serif;
-  font-optical-sizing: auto;
-  font-size: 20px;
-}
-
-.header {
-  position: relative;
-  top: 0;
-  left: 0;
-  width: 100%;
-  padding: 20px 100px;
-  background: #2a9d8f;
-  display: flex;
-}
-
-.menu {
-  display: flex;
-}
-
 body {
   margin: 0;
   padding: 0;
-}
-
-#logo {
-  font-size: 22px;
-  font-family: 'Audiowide', serif;
-  font-style: normal;
 }
 
 button {
@@ -283,85 +260,83 @@ button:hover {
   color: white;
   text-decoration: underline;
   cursor: pointer;
-  text-decoration: none;
-}
-
-#icone {
-  margin-right: 5px;
 }
 
 .search-container {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  justify-content: space-between;
   align-items: center;
-  gap: 20px;
+  width: 80%;
+  margin: 0 auto 40px;
 }
 
 .search-bar {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin-bottom: 15px;
   position: relative;
+  width: 60%;
 }
 
 .search-bar input {
-  padding: 8px;
-  border: 1px solid #ccc;
-  border-radius: 5px;
-  width: 200px;
+  padding: 12px 15px;
+  border: 2px solid #2a9d8f;
+  border-radius: 25px;
+  width: 100%;
+  font-size: 16px;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s;
 }
 
-.search-bar button {
-  padding: 8px;
-  border: none;
-  background: #2a9d8f;
-  color: white;
-  border-radius: 5px;
-  margin-left: 5px;
-  cursor: pointer;
-}
-
-.dropdown {
-  position: absolute;
-  background: white;
-  border: 1px solid #ccc;
-  width: 200px;
-  max-height: 150px;
-  overflow-y: auto;
-  list-style-type: none;
-  padding: 0;
-  margin: 0;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
-  bottom: 100%;
-  left: 0;
-  z-index: 1000;
+.search-bar input:focus {
+  outline: none;
+  box-shadow: 0 2px 8px rgba(42, 157, 143, 0.4);
+  border-color: #2a9d8f;
 }
 
 .dropdown li {
-  padding: 8px;
+  padding: 10px 15px;
   cursor: pointer;
+  transition: background 0.2s;
 }
 
 .dropdown li:hover {
-  background: #2a9d8f;
-  color: white;
+  background: #e6f5f3;
+  color: #2a9d8f;
 }
 
 .filter-bar {
   display: flex;
-  justify-content: center;
   gap: 15px;
+  justify-content: flex-end;
+  width: 35%;
 }
 
-.user-section {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.filter-bar select {
+  padding: 10px 15px;
+  border: 2px solid #2a9d8f;
+  border-radius: 20px;
+  background-color: white;
+  color: #444;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.3s;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232a9d8f' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 16px;
+  padding-right: 35px;
+  min-width: 120px;
 }
 
-.user-section button:hover {
-  background-color: #21867a;
+.filter-bar select:focus {
+  outline: none;
+  box-shadow: 0 2px 8px rgba(42, 157, 143, 0.4);
+}
+
+.filter-bar select:hover {
+  background-color: #f0f8f7;
 }
 
 .Acceuil {
@@ -372,19 +347,31 @@ button:hover {
   background-attachment: fixed;
   width: 100%;
   height: 700px;
-  margin: none;
   display: flex;
   align-items: center;
   position: relative;
   justify-content: flex-start;
-  margin-left: auto;
-  margin-right: auto;
 }
 
 @media screen and (max-width: 768px) {
   .Acceuil {
     background-image: url(/src/Pictures/Image1.png);
     background-attachment: scroll;
+  }
+
+  .search-container {
+    flex-direction: column;
+    width: 90%;
+  }
+
+  .search-bar {
+    width: 100%;
+    margin-bottom: 15px;
+  }
+
+  .filter-bar {
+    width: 100%;
+    justify-content: center;
   }
 }
 
@@ -418,132 +405,90 @@ button:hover {
 
 .restaurants {
   background-color: #ffe8d6;
-  height: 2000px;
   text-align: center;
   padding-top: 100px;
 }
 
-.all-restaurants {
+.restaurant-list {
   display: flex;
-  align-items: center;
   flex-wrap: wrap;
-  padding-top: 5rem;
-  justify-content: space-around;
-  text-align: center;
-  text-shadow: 0 5px 10px rgba(0, 0, 0, 0.2);
-}
-
-.restaurant {
-  display: grid;
-  overflow: hidden;
-  border-radius: 15px;
-  background-color: #ce6a85;
-  margin: 10px;
+  justify-content: center;
   gap: 15px;
-  grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
-}
-
-.box {
-  border-radius: 5px;
+  padding-top: 30px;
   text-align: center;
-  box-shadow: 0 5px 10px rgba(0, 0, 0, 0.2);
-  height: 380px;
+  margin-top: 4rem;
 }
 
-.image-restau {
+.restaurant-card {
+  background-color: #fff;
+  border-radius: 15px;
   padding: 15px;
-  height: 200px;
+  width: 300px;
+  box-shadow: 0 5px 10px rgba(0, 0, 0, 0.2);
+  text-align: center;
+  border: 2px solid #2a9d8f;
 }
 
-.restaurant-title {
-  position: center;
-  margin: none;
-  border: none;
-
-  font-size: 22px;
-  margin: 0;
-}
-
-.rating {
-  line-height: 1.8;
-  font-size: 20px;
-  padding: 10px 0;
-  margin: 0;
-}
-
-.more {
-  font-size: 1rem;
-  border: none;
-  outline: none;
-  border-radius: 10px;
-  background-color: white;
-  color: black;
-  padding: 10px 20px;
-}
-
-.footer {
-  width: 100%;
-  background-color: #ce6a85;
-  padding: 70px 0;
-}
-
-ul {
-  list-style: none;
-}
-
-.footer-elements {
-  width: 25%;
-  padding: 0 15px;
-  height: 200px;
-}
-
-.row {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-evenly;
-  align-items: center;
-}
-
-.footer-elements h4 {
-  font-size: 18px;
-  color: wheat;
-  text-transform: capitalize;
-  margin-bottom: 30px;
-  font-weight: 500;
-  position: relative;
-}
-
-.footer-elements h4::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  bottom: -10px;
-  background-color: white;
-  height: 2px;
-  box-sizing: border-box;
-  width: 50px;
-}
-
-.footer-elements ul li :not(:last-child) {
+.restaurant-header {
   margin-bottom: 10px;
 }
 
-.footer-elements ul li a {
-  font-size: 16px;
-  text-transform: capitalize;
-  text-decoration: none;
-  font-weight: 300;
-  color: antiquewhite;
-  display: block;
-  margin: 0 10px 10px 0;
+.restaurant-name {
+  font-size: 18px;
+  font-weight: bold;
+  color: #2a9d8f;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  max-width: 90%;
+  margin: 0 auto;
 }
 
-.social-link ul li a {
-  display: inline-block;
-  margin-right: 10px;
-  font-size: 24px;
-  display: flex;
-  gap: 10px;
+.restaurant-tel {
+  font-size: 14px;
+  color: #555;
+}
+
+.restaurant-image {
+  width: 100%;
+  height: 170px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid #ddd;
+}
+
+.restaurant-info {
+  margin-top: 10px;
+}
+
+.restaurant-address {
+  font-size: 12px;
+  color: #444;
+  margin-bottom: 5px;
+}
+
+.restaurant-rating {
+  font-size: 16px;
+  font-weight: bold;
+  color: #d2691e;
+}
+
+.details-button {
+  display: block;
+  text-decoration: none;
+  background-color: #2a9d8f;
+  color: white;
+  padding: 8px;
+  border-radius: 6px;
+  margin-top: 10px;
+  transition: background-color 0.3s;
+}
+
+.details-button:hover {
+  background-color: #1d6f63;
+}
+
+.review-button-card {
+  margin-top: 10px;
 }
 
 .geo-section {
@@ -558,21 +503,6 @@ ul {
   margin-bottom: 22.5px;
 }
 
-.map-placeholder {
-  width: 80%;
-  height: 500px;
-
-  background: linear-gradient(45deg, #ffebee, #ffcdd2);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #c62828;
-  font-size: 24px;
-  border: 3px dashed #2a9d8f;
-  border-radius: 12px;
-  margin-bottom: 22.5px;
-}
-
 #map {
   width: 85%;
   height: 500px;
@@ -580,7 +510,35 @@ ul {
   border: 3px solid #2a9d8f;
   align-items: center;
   justify-content: center;
-  margin-bottom: 20px;
   margin: 0 auto;
+}
+
+.review-button-card {
+  margin-bottom: 10px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.pagination button {
+  padding: 8px 16px;
+  border: none;
+  background-color: #2a9d8f;
+  color: white;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.pagination button:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
 }
 </style>
