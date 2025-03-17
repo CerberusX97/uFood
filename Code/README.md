@@ -23,6 +23,9 @@ npm -v
 
 ```bash
 npm install
+
+If Axios error:
+npm install axios
 ```
 
 ## Développement
